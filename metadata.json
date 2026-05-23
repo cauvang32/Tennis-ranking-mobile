@@ -1,0 +1,6 @@
+{
+  "name": "Tennis Pro",
+  "description": "Premium High-Density mobile client for tracking matches, seasons, and real-time tennis rankings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

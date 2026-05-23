@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="26"
+        android:translateY="26"
+        android:scaleX="2.3"
+        android:scaleY="2.3">
+        <!-- Path for sports_tennis -->
+        <path
+            android:fillColor="#E3F2FD"
+            android:pathData="M22.8,17.9L15.6,10.7c0.2-0.6 0.4-1.4 0.4-2.2c0-3-2.5-5.5-5.5-5.5S5,5.5 5,8.5s2.5,5.5 5.5,5.5c0.8,0 1.6-0.2 2.2-0.4l7.2,7.2L22.8,17.9zM10.5,12C8.6,12 7,10.4 7,8.5S8.6,5 10.5,5S14,6.6 14,8.5S12.4,12 10.5,12z" />
+    </group>
+</vector>
