@@ -220,7 +220,7 @@ fun SeasonsScreen(
                     ) {
                         items(seasonsList, key = { it.id }, contentType = { "season_card" }) { season ->
                             val onEnd = remember(season.id) { { seasonPendingEnd = season } }
-                            val onReactivate = remember(season.id) { { scope.launch { TennisRepository.reactivateSeason(season.id) } } }
+                            val onReactivate = remember(season.id) { { scope.launch { TennisRepository.reactivateSeason(season.id) }; Unit } }
                             val onDelete = remember(season.id) { { seasonPendingDelete = season } }
                             val onManage = remember(season.id) { { selectedSeasonForRoster = season } }
 
