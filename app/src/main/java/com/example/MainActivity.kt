@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -103,7 +104,7 @@ fun MainAppLayout() {
                             activeTab = 1
                             isLoginOpen = false
                         },
-                        icon = { Icon(Icons.Default.List, contentDescription = "BXH") },
+                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "BXH") },
                         label = { Text("BXH", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = brandPrimary,

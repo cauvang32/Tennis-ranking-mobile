@@ -9,41 +9,41 @@ data class User(
     val username: String? = null,
     val email: String? = null,
     val role: String? = null, // admin, editor, viewer
-    @Json(name = "displayName") val displayName: String? = null
+    @param:Json(name = "displayName") val displayName: String? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class Player(
     val id: Int,
     val name: String,
-    @Json(name = "created_at") val createdAt: String? = null
+    @param:Json(name = "created_at") val createdAt: String? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class Season(
     val id: Int,
     val name: String,
-    @Json(name = "start_date") val startDate: String,
-    @Json(name = "end_date") val endDate: String?,
-    @Json(name = "is_active") val isActive: Boolean,
-    @Json(name = "auto_end") val autoEnd: Boolean,
+    @param:Json(name = "start_date") val startDate: String,
+    @param:Json(name = "end_date") val endDate: String?,
+    @param:Json(name = "is_active") val isActive: Boolean,
+    @param:Json(name = "auto_end") val autoEnd: Boolean,
     val description: String?,
-    @Json(name = "lose_money_per_loss") val loseMoneyPerLoss: Int?
+    @param:Json(name = "lose_money_per_loss") val loseMoneyPerLoss: Int?
 )
 
 @JsonClass(generateAdapter = true)
 data class Match(
     val id: Int,
-    @Json(name = "season_id") val seasonId: Int,
-    @Json(name = "play_date") val playDate: String,
-    @Json(name = "player1_id") val player1Id: Int,
-    @Json(name = "player2_id") val player2Id: Int?,
-    @Json(name = "player3_id") val player3Id: Int,
-    @Json(name = "player4_id") val player4Id: Int?,
-    @Json(name = "team1_score") val team1Score: Int,
-    @Json(name = "team2_score") val team2Score: Int,
-    @Json(name = "winning_team") val winningTeam: Int, // 1 or 2
-    @Json(name = "match_type") val matchType: String, // solo or duo
+    @param:Json(name = "season_id") val seasonId: Int,
+    @param:Json(name = "play_date") val playDate: String,
+    @param:Json(name = "player1_id") val player1Id: Int,
+    @param:Json(name = "player2_id") val player2Id: Int?,
+    @param:Json(name = "player3_id") val player3Id: Int,
+    @param:Json(name = "player4_id") val player4Id: Int?,
+    @param:Json(name = "team1_score") val team1Score: Int,
+    @param:Json(name = "team2_score") val team2Score: Int,
+    @param:Json(name = "winning_team") val winningTeam: Int, // 1 or 2
+    @param:Json(name = "match_type") val matchType: String, // solo or duo
     
     // UI Helpers (sometimes returned as joined fields or we can look them up)
     val player1_name: String? = null,
@@ -55,7 +55,7 @@ data class Match(
 @JsonClass(generateAdapter = true)
 data class FormEntry(
     val result: String?,
-    @Json(name = "play_date") val playDate: String?
+    @param:Json(name = "play_date") val playDate: String?
 )
 
 @JsonClass(generateAdapter = true)
@@ -64,10 +64,10 @@ data class RankingEntry(
     val name: String,
     val wins: Int,
     val losses: Int,
-    @Json(name = "total_matches") val totalMatches: Int,
+    @param:Json(name = "total_matches") val totalMatches: Int,
     val points: Int,
-    @Json(name = "win_percentage") val winPercentage: Double?,
-    @Json(name = "money_lost") val moneyLost: Int?,
+    @param:Json(name = "win_percentage") val winPercentage: Double?,
+    @param:Json(name = "money_lost") val moneyLost: Int?,
     val form: List<FormEntry>? = null
 ) {
     val formStrings: List<String>
@@ -76,7 +76,7 @@ data class RankingEntry(
 
 @JsonClass(generateAdapter = true)
 data class PlayDateEntry(
-    @Json(name = "play_date") val playDate: String
+    @param:Json(name = "play_date") val playDate: String
 )
 
 @JsonClass(generateAdapter = true)

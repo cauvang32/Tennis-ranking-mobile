@@ -10,11 +10,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -129,7 +129,7 @@ fun RankingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f, fill = false)
                 ) {
-                    Icon(Icons.Default.List, contentDescription = null, tint = brandPrimary, modifier = Modifier.size(28.dp))
+                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, tint = brandPrimary, modifier = Modifier.size(28.dp))
                     Text(
                         text = "Bảng xếp hạng",
                         fontSize = 18.sp,
@@ -182,7 +182,7 @@ fun RankingsScreen(
                                 .testTag("logout_button_rankings")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ExitToApp,
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
                                 contentDescription = null,
                                 modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.error

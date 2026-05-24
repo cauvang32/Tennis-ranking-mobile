@@ -11,7 +11,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
@@ -126,7 +126,7 @@ fun LoginScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.ExitToApp, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Đăng xuất", fontWeight = FontWeight.Bold)
                     }

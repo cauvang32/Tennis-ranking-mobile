@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -226,7 +228,7 @@ fun DashboardScreen(
                                 .testTag("logout_button_top_dashboard")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ExitToApp,
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
                                 contentDescription = null,
                                 modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.error
@@ -300,7 +302,7 @@ fun DashboardScreen(
                                     )
                                 }
                                 Icon(
-                                    imageVector = Icons.Default.ArrowForward,
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                     contentDescription = "Go to login",
                                     tint = brandPrimary
                                 )
@@ -369,7 +371,7 @@ fun DashboardScreen(
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                                 Text(
-                                    text = if (featuredMatch != null) "NGÀY THI ĐẤU • ${featuredMatch.playDate}" else "LIVE DEMO • COURT 1",
+                                    text = "NGÀY THI ĐẤU • ${featuredMatch.playDate}",
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
@@ -446,11 +448,7 @@ fun DashboardScreen(
                                         )
                                     }
                                     Text(
-                                        text = if (featuredMatch != null) {
-                                            "ĐỘI THẮNG: TEAM ${featuredMatch.winningTeam}"
-                                        } else {
-                                            "MATCH POINT"
-                                        },
+                                        text = "ĐỘI THẮNG: TEAM ${featuredMatch.winningTeam}",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = brandPrimary,
