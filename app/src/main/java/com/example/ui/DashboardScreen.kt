@@ -36,6 +36,8 @@ import com.example.repository.TennisRepository
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import com.example.R
+import androidx.compose.ui.res.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,6 +58,7 @@ fun DashboardScreen(
     var filterType by remember { mutableStateOf(0) } // 0: Theo ngày, 1: Theo mùa
     var matchesList by remember { mutableStateOf<List<Match>>(emptyList()) }
     var isFilterMatchesLoading by remember { mutableStateOf(false) }
+    var matchPendingDelete by remember { mutableStateOf<Match?>(null) }
 
     // Colors aligned with High-Density CSS
     val brandPrimary = MaterialTheme.colorScheme.primary
@@ -65,6 +68,7 @@ fun DashboardScreen(
     // P5: Use stable keys from initData to avoid redundant API calls on every background sync
     val currentDefaultDate = initData?.defaultDate
     val currentDefaultDateMatches = initData?.defaultDateMatches
+    val dataVersion = initData?.version ?: 0L
 
     // Reactively update match list when showing default view (no API call needed)
     LaunchedEffect(currentDefaultDateMatches, filterType, selectedFilterDate) {
@@ -73,8 +77,8 @@ fun DashboardScreen(
         }
     }
 
-    // Fetch from API only when user explicitly changes filter selections
-    LaunchedEffect(selectedFilterDate, selectedFilterSeasonId, filterType) {
+    // Fetch from API when user changes filter selections OR when background sync updates data version
+    LaunchedEffect(selectedFilterDate, selectedFilterSeasonId, filterType, dataVersion) {
         if (filterType == 0) {
             val date = selectedFilterDate ?: return@LaunchedEffect
             // P7: Use cached data when selected date matches default date
@@ -508,15 +512,14 @@ fun DashboardScreen(
                             }
                         }
                     } else {
-                        items(matchesList, key = { it.id }) { match ->
+                        items(matchesList, key = { it.id }, contentType = { "match_card" }) { match ->
+                            val onDelete = remember(match.id) {
+                                { matchPendingDelete = match }
+                            }
                             MatchListItem(
                                 match = match,
                                 isAdminOrEditor = isAuthenticated && (currentUser?.role == "admin" || currentUser?.role == "editor"),
-                                onDeleteClick = {
-                                    scope.launch {
-                                        TennisRepository.deleteMatch(match.id)
-                                    }
-                                }
+                                onDeleteClick = onDelete
                             )
                         }
                     }
@@ -577,6 +580,37 @@ fun DashboardScreen(
                     if (success) {
                         isCreateMatchOpen = false
                     }
+                }
+            }
+        )
+    }
+
+    // CONFIRM DELETE MATCH DIALOG
+    if (matchPendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { matchPendingDelete = null },
+            title = { Text(stringResource(R.string.dialog_delete_match_title), fontWeight = FontWeight.Bold) },
+            text = {
+                val m = matchPendingDelete
+                Text(stringResource(R.string.dialog_delete_match_body, m?.playDate ?: "", m?.player1_name ?: "", m?.player3_name ?: ""))
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val target = matchPendingDelete ?: return@Button
+                        scope.launch {
+                            TennisRepository.deleteMatch(target.id)
+                            matchPendingDelete = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.button_delete_match))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { matchPendingDelete = null }) {
+                    Text(stringResource(R.string.button_cancel))
                 }
             }
         )

@@ -60,6 +60,7 @@ fun RankingsScreen(
     val lifetimeRankings = initData?.lifetimeRankings
     val defaultDateRankings = initData?.defaultDateRankings
     val currentDefaultDate = initData?.defaultDate
+    val dataVersion = initData?.version ?: 0L
 
     // Reactively update lifetime rankings (Tab 0) without API calls
     LaunchedEffect(lifetimeRankings, activeTab) {
@@ -76,8 +77,8 @@ fun RankingsScreen(
         }
     }
 
-    // Fetch from API only when user explicitly changes tab/filter selections
-    LaunchedEffect(activeTab, selectedSeasonId, selectedDate) {
+    // Fetch from API when user changes tab/filter selections OR when background sync updates data version
+    LaunchedEffect(activeTab, selectedSeasonId, selectedDate, dataVersion) {
         isLocalLoading = true
         when (activeTab) {
             0 -> {
@@ -402,7 +403,7 @@ fun RankingsScreen(
                             .thenBy { it.name }
                     )
 
-                    itemsIndexed(sortedRankings, key = { _, item -> item.id }) { index, entry ->
+                    itemsIndexed(sortedRankings, key = { _, item -> item.id }, contentType = { _, _ -> "ranking_row" }) { index, entry ->
                         RankingRowItem(
                             pos = index + 1,
                             entry = entry,

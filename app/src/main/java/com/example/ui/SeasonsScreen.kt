@@ -28,6 +28,8 @@ import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
+import com.example.R
+import androidx.compose.ui.res.stringResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +45,8 @@ fun SeasonsScreen(
     val scope = rememberCoroutineScope()
     var isCreateSeasonOpen by remember { mutableStateOf(false) }
     var selectedSeasonForRoster by remember { mutableStateOf<Season?>(null) }
+    var seasonPendingDelete by remember { mutableStateOf<Season?>(null) }
+    var seasonPendingEnd by remember { mutableStateOf<Season?>(null) }
 
     val brandPrimary = MaterialTheme.colorScheme.primary
     val cardStroke = MaterialTheme.colorScheme.outlineVariant
@@ -214,30 +218,20 @@ fun SeasonsScreen(
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
-                        items(seasonsList, key = { it.id }) { season ->
+                        items(seasonsList, key = { it.id }, contentType = { "season_card" }) { season ->
+                            val onEnd = remember(season.id) { { seasonPendingEnd = season } }
+                            val onReactivate = remember(season.id) { { scope.launch { TennisRepository.reactivateSeason(season.id) } } }
+                            val onDelete = remember(season.id) { { seasonPendingDelete = season } }
+                            val onManage = remember(season.id) { { selectedSeasonForRoster = season } }
+
                             SeasonListItem(
                                 season = season,
                                 isAdmin = isAuthenticated && currentUser?.role == "admin",
                                 isEditorOrAdmin = isAuthenticated && (currentUser?.role == "editor" || currentUser?.role == "admin"),
-                                onEndClick = {
-                                    scope.launch {
-                                        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                                        TennisRepository.endSeason(season.id, todayStr)
-                                    }
-                                },
-                                onReactivateClick = {
-                                    scope.launch {
-                                        TennisRepository.reactivateSeason(season.id)
-                                    }
-                                },
-                                onDeleteClick = {
-                                    scope.launch {
-                                        TennisRepository.deleteSeason(season.id)
-                                    }
-                                },
-                                onManageRosterClick = {
-                                    selectedSeasonForRoster = season
-                                }
+                                onEndClick = onEnd,
+                                onReactivateClick = onReactivate,
+                                onDeleteClick = onDelete,
+                                onManageRosterClick = onManage
                             )
                         }
                     }
@@ -276,6 +270,63 @@ fun SeasonsScreen(
                     if (success) {
                         selectedSeasonForRoster = null
                     }
+                }
+            }
+        )
+    }
+
+    // CONFIRM DELETE SEASON DIALOG
+    if (seasonPendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { seasonPendingDelete = null },
+            title = { Text(stringResource(R.string.dialog_delete_season_title), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.dialog_delete_season_body, seasonPendingDelete?.name ?: "")) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val target = seasonPendingDelete ?: return@Button
+                        scope.launch {
+                            TennisRepository.deleteSeason(target.id)
+                            seasonPendingDelete = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.button_delete_season))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { seasonPendingDelete = null }) {
+                    Text(stringResource(R.string.button_cancel))
+                }
+            }
+        )
+    }
+
+    // CONFIRM END SEASON DIALOG
+    if (seasonPendingEnd != null) {
+        AlertDialog(
+            onDismissRequest = { seasonPendingEnd = null },
+            title = { Text(stringResource(R.string.dialog_end_season_title), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.dialog_end_season_body, seasonPendingEnd?.name ?: "")) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val target = seasonPendingEnd ?: return@Button
+                        scope.launch {
+                            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                            TennisRepository.endSeason(target.id, todayStr)
+                            seasonPendingEnd = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.button_end_season))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { seasonPendingEnd = null }) {
+                    Text(stringResource(R.string.button_cancel))
                 }
             }
         )
@@ -617,6 +668,7 @@ fun RosterManagerDialog(
     val chosenPlayerIds = remember { mutableStateListOf<Int>() }
     var assignedPlayers by remember { mutableStateOf<List<Player>>(emptyList()) }
     var isLoadingRoster by remember { mutableStateOf(false) }
+    var isSavingRoster by remember { mutableStateOf(false) }
 
     val brandPrimary = MaterialTheme.colorScheme.primary
 
@@ -690,10 +742,23 @@ fun RosterManagerDialog(
         confirmButton = {
             if (isAdminOrEditor) {
                 Button(
-                    onClick = { onConfirm(chosenPlayerIds.toList()) },
+                    onClick = {
+                        if (isSavingRoster) return@Button
+                        isSavingRoster = true
+                        onConfirm(chosenPlayerIds.toList())
+                    },
+                    enabled = !isSavingRoster,
                     colors = ButtonDefaults.buttonColors(containerColor = brandPrimary)
                 ) {
-                    Text("Lưu DSTĐ")
+                    if (isSavingRoster) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Lưu DSTĐ")
+                    }
                 }
             } else {
                 Button(

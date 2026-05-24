@@ -1,3 +1,22 @@
 <resources>
     <string name="app_name">Tennis Pro</string>
+
+    <!-- Confirmation Dialog Titles -->
+    <string name="dialog_delete_player_title">Xác nhận xóa VĐV</string>
+    <string name="dialog_delete_season_title">Xóa Mùa Giải</string>
+    <string name="dialog_end_season_title">Kết thúc Mùa Giải</string>
+    <string name="dialog_delete_match_title">Xóa Trận Đấu</string>
+
+    <!-- Confirmation Dialog Bodies -->
+    <string name="dialog_delete_player_body">Bạn có chắc chắn muốn xóa VĐV \'%1$s\'? Hành động này không thể hoàn tác.</string>
+    <string name="dialog_delete_season_body">Bạn có chắc chắn muốn xóa mùa giải \'%1$s\'? Toàn bộ dữ liệu liên quan sẽ bị xóa vĩnh viễn.</string>
+    <string name="dialog_end_season_body">Bạn có chắc chắn muốn kết thúc mùa giải \'%1$s\'?</string>
+    <string name="dialog_delete_match_body">Bạn có chắc chắn muốn xóa trận đấu ngày %1$s (%2$s vs %3$s)? Hành động này không thể hoàn tác.</string>
+
+    <!-- Button Labels -->
+    <string name="button_delete_player">Xóa VĐV</string>
+    <string name="button_delete_season">Xóa Mùa Giải</string>
+    <string name="button_end_season">Kết thúc</string>
+    <string name="button_delete_match">Xóa Trận Đấu</string>
+    <string name="button_cancel">Hủy</string>
 </resources>

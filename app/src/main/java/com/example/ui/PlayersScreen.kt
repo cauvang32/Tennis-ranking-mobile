@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.api.Player
 import com.example.repository.TennisRepository
+import com.example.R
+import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,6 +46,7 @@ fun PlayersScreen(
     val scope = rememberCoroutineScope()
     var isCreatePlayerOpen by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var playerPendingDelete by remember { mutableStateOf<Player?>(null) }
 
     val brandPrimary = MaterialTheme.colorScheme.primary
 
@@ -244,15 +247,14 @@ fun PlayersScreen(
                             .fillMaxWidth()
                             .weight(1f)
                     ) {
-                        items(filteredPlayers, key = { it.id }) { player ->
+                        items(filteredPlayers, key = { it.id }, contentType = { "player_card" }) { player ->
+                            val onDelete = remember(player.id) {
+                                { playerPendingDelete = player }
+                            }
                             PlayerGridCard(
                                 player = player,
                                 isAdmin = isAuthenticated && currentUser?.role == "admin",
-                                onDeleteClick = {
-                                    scope.launch {
-                                        TennisRepository.deletePlayer(player.id)
-                                    }
-                                },
+                                onDeleteClick = onDelete,
                                 brandColor = brandPrimary
                             )
                         }
@@ -272,6 +274,34 @@ fun PlayersScreen(
                     if (success) {
                         isCreatePlayerOpen = false
                     }
+                }
+            }
+        )
+    }
+
+    // CONFIRM DELETE PLAYER DIALOG
+    if (playerPendingDelete != null) {
+        AlertDialog(
+            onDismissRequest = { playerPendingDelete = null },
+            title = { Text(stringResource(R.string.dialog_delete_player_title), fontWeight = FontWeight.Bold) },
+            text = { Text(stringResource(R.string.dialog_delete_player_body, playerPendingDelete?.name ?: "")) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val target = playerPendingDelete ?: return@Button
+                        scope.launch {
+                            TennisRepository.deletePlayer(target.id)
+                            playerPendingDelete = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(stringResource(R.string.button_delete_player))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { playerPendingDelete = null }) {
+                    Text(stringResource(R.string.button_cancel))
                 }
             }
         )

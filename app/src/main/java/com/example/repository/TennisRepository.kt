@@ -1,8 +1,12 @@
 package com.example.repository
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.util.Log
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import com.example.api.*
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.FromJson
@@ -14,6 +18,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import okhttp3.CertificatePinner
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -22,14 +29,14 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.io.IOException
 
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "tennis_settings")
+
 object TennisRepository {
-    private const val PREFS_NAME = "tennis_prefs"
-    private const val KEY_BEARER_TOKEN = "bearer_token"
-    private const val KEY_CSRF_TOKEN = "csrf_token"
-    private const val KEY_USER_JSON = "user_json"
+    private val PREF_KEY_BEARER_TOKEN = stringPreferencesKey("bearer_token")
+    private val PREF_KEY_CSRF_TOKEN = stringPreferencesKey("csrf_token")
+    private val PREF_KEY_USER_JSON = stringPreferencesKey("user_json")
 
     private lateinit var context: Context
-    private lateinit var sharedPrefs: SharedPreferences
     private lateinit var cookieJar: PersistentCookieJar
     private lateinit var moshi: Moshi
     private lateinit var okHttpClient: OkHttpClient
@@ -71,26 +78,32 @@ object TennisRepository {
 
     fun initialize(androidContext: Context) {
         context = androidContext.applicationContext
-        sharedPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         cookieJar = PersistentCookieJar(context)
-        
+
         moshi = Moshi.Builder()
             .add(CoerceIntAdapter())
             .add(CoerceDoubleAdapter())
             .addLast(KotlinJsonAdapterFactory())
             .build()
 
-        // Load credentials from Prefs
-        currentBearerToken = sharedPrefs.getString(KEY_BEARER_TOKEN, null)
-        _csrfToken.value = sharedPrefs.getString(KEY_CSRF_TOKEN, null)
-        val userJson = sharedPrefs.getString(KEY_USER_JSON, null)
-        if (userJson != null) {
-            try {
-                _currentUser.value = moshi.adapter(User::class.java).fromJson(userJson)
-                _isAuthenticated.value = true
-            } catch (e: Exception) {
-                Log.e("TennisRepository", "Error reading stored user", e)
+        // Load credentials from DataStore (blocking on startup to ensure tokens
+        // are available before the first network request is dispatched)
+        try {
+            val prefs = runBlocking { context.dataStore.data.first() }
+            val encryptedToken = prefs[PREF_KEY_BEARER_TOKEN]
+            currentBearerToken = encryptedToken?.let { CryptoHelper.decrypt(it) }
+            _csrfToken.value = prefs[PREF_KEY_CSRF_TOKEN]
+            val userJson = prefs[PREF_KEY_USER_JSON]
+            if (userJson != null) {
+                try {
+                    _currentUser.value = moshi.adapter(User::class.java).fromJson(userJson)
+                    _isAuthenticated.value = true
+                } catch (e: Exception) {
+                    Log.e("TennisRepository", "Error reading stored user", e)
+                }
             }
+        } catch (e: Exception) {
+            Log.e("TennisRepository", "Failed to load DataStore preferences", e)
         }
 
         // Configure HttpLogging Interceptor
@@ -101,29 +114,38 @@ object TennisRepository {
         // Configure Custom Header Interceptor for dynamic tokens
         val headerInterceptor = Interceptor { chain ->
             val builder = chain.request().newBuilder()
-            
+
             // Inject Bearer token if present
             currentBearerToken?.let { token ->
                 builder.addHeader("Authorization", "Bearer $token")
             }
-            
+
             // Inject CSRF token if present
             _csrfToken.value?.let { csrf ->
                 builder.addHeader("X-CSRF-Token", csrf)
             }
-            
+
             // We are an API client: apply default only if no Accept header is present
             if (chain.request().header("Accept") == null) {
                 builder.header("Accept", "application/json")
             }
-            
+
             chain.proceed(builder.build())
         }
 
+        // SSL Certificate Pinning to prevent MitM proxy interception
+        val certificatePinner = CertificatePinner.Builder()
+            .add("hungsanity.com", "sha256/qwEqdHE3eI23vbVyZOoDcJcuCNl39yadoKBIWfeZ3EU=")
+            .build()
+
         okHttpClient = OkHttpClient.Builder()
             .cookieJar(cookieJar)
+            .certificatePinner(certificatePinner)
             .addInterceptor(headerInterceptor)
             .addInterceptor(loggingInterceptor)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
             .build()
 
         // P1: Build SSE client once with no read timeout for long-lived connections
@@ -166,8 +188,8 @@ object TennisRepository {
     private suspend fun <T> safeApiCall(showLoading: Boolean = true, call: suspend () -> Response<T>): T? {
         if (showLoading) {
             _isLoading.value = true
+            _errorMessage.value = null
         }
-        _errorMessage.value = null
         try {
             val response = call()
             if (response.isSuccessful) {
@@ -182,25 +204,28 @@ object TennisRepository {
                     Log.w("TennisRepository", "Auth expired or CSRF error, clearing credentials")
                     clearSession()
                 }
-                _errorMessage.value = parsedError
+                // Only surface errors for user-initiated calls
                 if (showLoading) {
+                    _errorMessage.value = parsedError
                     _isLoading.value = false
+                } else {
+                    Log.w("TennisRepository", "Background call error (suppressed): $parsedError")
                 }
                 return null
             }
         } catch (e: IOException) {
-            _errorMessage.value = "Network error. Please check your connection."
-            Log.e("TennisRepository", "Network call failed", e)
             if (showLoading) {
+                _errorMessage.value = "Network error. Please check your connection."
                 _isLoading.value = false
             }
+            Log.e("TennisRepository", "Network call failed", e)
             return null
         } catch (e: Exception) {
-            _errorMessage.value = "Unexpected error occurred."
-            Log.e("TennisRepository", "API execution error", e)
             if (showLoading) {
+                _errorMessage.value = "Unexpected error occurred."
                 _isLoading.value = false
             }
+            Log.e("TennisRepository", "API execution error", e)
             return null
         }
     }
@@ -371,7 +396,7 @@ object TennisRepository {
     }
 
     suspend fun getSeasonPlayers(seasonId: Int): List<Player> {
-        val res = safeApiCall { api.getSeasonPlayers(seasonId) }
+        val res = safeApiCall(showLoading = false) { api.getSeasonPlayers(seasonId) }
         return res ?: emptyList()
     }
 
@@ -424,38 +449,62 @@ object TennisRepository {
         return safeApiCall { api.getDateRankings(date) }
     }
 
-    // Session Management Implementation
+    // Session Management Implementation (Preferences DataStore + CryptoHelper)
     private fun saveSession(loginResponse: LoginResponse) {
-        val editor = sharedPrefs.edit()
-        
         loginResponse.token?.let { token ->
             currentBearerToken = token
-            editor.putString(KEY_BEARER_TOKEN, token)
         }
-        
         loginResponse.csrfToken?.let { csrf ->
             _csrfToken.value = csrf
-            editor.putString(KEY_CSRF_TOKEN, csrf)
         }
-        
         loginResponse.user?.let { user ->
             _currentUser.value = user
             _isAuthenticated.value = true
-            
+        }
+
+        // Persist to DataStore asynchronously
+        CoroutineScope(Dispatchers.IO).launch {
             try {
-                val userStr = moshi.adapter(User::class.java).toJson(user)
-                editor.putString(KEY_USER_JSON, userStr)
+                context.dataStore.edit { prefs ->
+                    loginResponse.token?.let { token ->
+                        val encrypted = CryptoHelper.encrypt(token)
+                        if (encrypted != null) {
+                            prefs[PREF_KEY_BEARER_TOKEN] = encrypted
+                        }
+                    }
+                    loginResponse.csrfToken?.let { csrf ->
+                        prefs[PREF_KEY_CSRF_TOKEN] = csrf
+                    }
+                    loginResponse.user?.let { user ->
+                        try {
+                            val userStr = moshi.adapter(User::class.java).toJson(user)
+                            prefs[PREF_KEY_USER_JSON] = userStr
+                        } catch (e: Exception) {
+                            Log.e("TennisRepository", "Error serializing user object", e)
+                        }
+                    }
+                }
             } catch (e: Exception) {
-                Log.e("TennisRepository", "Error serializing user object", e)
+                Log.e("TennisRepository", "Failed to persist session to DataStore", e)
             }
         }
-        
-        editor.apply()
     }
 
     private fun setCsrfToken(csrf: String?) {
         _csrfToken.value = csrf
-        sharedPrefs.edit().putString(KEY_CSRF_TOKEN, csrf).apply()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                context.dataStore.edit { prefs ->
+                    if (csrf != null) {
+                        prefs[PREF_KEY_CSRF_TOKEN] = csrf
+                    } else {
+                        prefs.remove(PREF_KEY_CSRF_TOKEN)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("TennisRepository", "Failed to persist CSRF token", e)
+            }
+        }
     }
 
     private fun clearSession() {
@@ -463,12 +512,18 @@ object TennisRepository {
         _currentUser.value = null
         _isAuthenticated.value = false
         _csrfToken.value = null
-        
-        sharedPrefs.edit()
-            .remove(KEY_BEARER_TOKEN)
-            .remove(KEY_CSRF_TOKEN)
-            .remove(KEY_USER_JSON)
-            .apply()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                context.dataStore.edit { prefs ->
+                    prefs.remove(PREF_KEY_BEARER_TOKEN)
+                    prefs.remove(PREF_KEY_CSRF_TOKEN)
+                    prefs.remove(PREF_KEY_USER_JSON)
+                }
+            } catch (e: Exception) {
+                Log.e("TennisRepository", "Failed to clear DataStore", e)
+            }
+        }
 
         cookieJar.clear()
     }
@@ -522,8 +577,10 @@ object TennisRepository {
         Log.i("TennisRepository", "Stopping background sync...")
         syncScope?.cancel()
         syncScope = null
-        currentSseCall?.cancel()
-        currentSseCall = null
+        synchronized(this@TennisRepository) {
+            currentSseCall?.cancel()
+            currentSseCall = null
+        }
     }
 
     private suspend fun startSseStream() = withContext(Dispatchers.IO) {
@@ -534,11 +591,19 @@ object TennisRepository {
             .header("Connection", "keep-alive")
             .build()
 
+        val call = sseClient.newCall(request)
+
+        // Synchronized assignment: prevent race with stopBackgroundSync and old finally blocks
+        synchronized(this@TennisRepository) {
+            if (!isSseRunning) {
+                call.cancel()
+                return@withContext
+            }
+            currentSseCall = call
+        }
+
         try {
             Log.d("TennisRepository", "Connecting to SSE stream at ${BASE_URL}events")
-            // P1: Reuse pre-built SSE client instead of rebuilding on every reconnect
-            val call = sseClient.newCall(request)
-            currentSseCall = call
             call.execute().use { response ->
                 if (!response.isSuccessful) {
                     Log.e("TennisRepository", "SSE connection failed: code ${response.code}")
@@ -569,7 +634,12 @@ object TennisRepository {
                 Log.e("TennisRepository", "SSE stream disconnect / exception: ${e.message}")
             }
         } finally {
-            currentSseCall = null
+            // Only clear if this call is still the active one (prevents wiping a newer call)
+            synchronized(this@TennisRepository) {
+                if (currentSseCall === call) {
+                    currentSseCall = null
+                }
+            }
         }
     }
 }

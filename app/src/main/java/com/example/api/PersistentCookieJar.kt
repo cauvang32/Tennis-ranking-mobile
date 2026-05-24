@@ -71,25 +71,47 @@ class PersistentCookieJar(context: Context) : CookieJar {
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val host = url.host
         val now = System.currentTimeMillis()
-        val result = mutableListOf<Cookie>()
+        // Track each cookie alongside its actual storage key (origin host)
+        val candidates = mutableListOf<Pair<String, Cookie>>()
         
         // Load direct host cookies
-        cookiesStorage[host]?.values?.let { result.addAll(it) }
+        cookiesStorage[host]?.values?.forEach { candidates.add(host to it) }
         
-        // Check for domain-matched cookies (like .hungsanity.com Matching hungsanity.com)
+        // Check for domain-matched cookies (like .hungsanity.com matching hungsanity.com)
         for ((storedHost, domainMap) in cookiesStorage) {
             if (storedHost != host && (host.endsWith(".$storedHost") || storedHost.startsWith("."))) {
-                result.addAll(domainMap.values)
+                domainMap.values.forEach { candidates.add(storedHost to it) }
             }
         }
 
-        // Filter expired cookies and remove them from storage if expired
-        val validCookies = result.filter { cookie ->
+        // Filter expired cookies, remove from correct storage key, and persist changes
+        val modifiedHosts = mutableSetOf<String>()
+        val validCookies = mutableListOf<Cookie>()
+
+        for ((originHost, cookie) in candidates) {
             val isExpired = cookie.persistent && cookie.expiresAt < now
             if (isExpired) {
-                cookiesStorage[host]?.remove(cookie.name)
+                cookiesStorage[originHost]?.remove(cookie.name)
+                modifiedHosts.add(originHost)
+            } else {
+                validCookies.add(cookie)
             }
-            !isExpired
+        }
+
+        // Persist any expired cookie removals to disk
+        if (modifiedHosts.isNotEmpty()) {
+            val editor = sharedPrefs.edit()
+            for (modifiedHost in modifiedHosts) {
+                val remaining = cookiesStorage[modifiedHost]?.values
+                    ?.filter { !it.persistent || it.expiresAt >= now }
+                    ?.map { it.toString() }?.toSet()
+                if (remaining.isNullOrEmpty()) {
+                    editor.remove(modifiedHost)
+                } else {
+                    editor.putStringSet(modifiedHost, remaining)
+                }
+            }
+            editor.apply()
         }
         
         return validCookies

@@ -19,3 +19,34 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# === Moshi ===
+# Keep Moshi @JsonClass generated adapters
+-keepclassmembers class * {
+    @com.squareup.moshi.FromJson <methods>;
+    @com.squareup.moshi.ToJson <methods>;
+}
+# Keep all @JsonClass annotated classes and their generated adapters
+-keep @com.squareup.moshi.JsonClass class * { *; }
+-keep class **JsonAdapter { *; }
+# Keep Kotlin metadata for Moshi reflection
+-keepclassmembers class kotlin.Metadata { *; }
+
+# === Retrofit ===
+# Keep Retrofit service interfaces
+-keep,allowobfuscation interface * {
+    @retrofit2.http.* <methods>;
+}
+# Keep generic type signatures for Retrofit response parsing
+-keepattributes Signature
+-keepattributes Exceptions
+
+# === OkHttp ===
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+
+# === App API models ===
+# Keep all data classes used for API serialization
+-keep class com.example.api.** { *; }
