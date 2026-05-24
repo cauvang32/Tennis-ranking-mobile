@@ -56,17 +56,32 @@ fun RankingsScreen(
     val brandPrimary = MaterialTheme.colorScheme.primary
     val cardStroke = MaterialTheme.colorScheme.outlineVariant
 
-    // Load dynamic ranking lists based on selections
-    LaunchedEffect(initData, activeTab, selectedSeasonId, selectedDate) {
+    // P6: Use stable keys to avoid redundant API calls on every background sync
+    val lifetimeRankings = initData?.lifetimeRankings
+    val defaultDateRankings = initData?.defaultDateRankings
+    val currentDefaultDate = initData?.defaultDate
+
+    // Reactively update lifetime rankings (Tab 0) without API calls
+    LaunchedEffect(lifetimeRankings, activeTab) {
+        if (activeTab == 0) {
+            rankingsList = lifetimeRankings ?: emptyList()
+        }
+    }
+
+    // Reactively update default date rankings (Tab 2 with no custom selection)
+    LaunchedEffect(defaultDateRankings, activeTab, selectedDate) {
+        if (activeTab == 2 && (selectedDate == null || selectedDate == currentDefaultDate)) {
+            rankingsList = defaultDateRankings ?: emptyList()
+            if (selectedDate == null && currentDefaultDate != null) selectedDate = currentDefaultDate
+        }
+    }
+
+    // Fetch from API only when user explicitly changes tab/filter selections
+    LaunchedEffect(activeTab, selectedSeasonId, selectedDate) {
         isLocalLoading = true
         when (activeTab) {
             0 -> {
-                val res = TennisRepository.fetchLifetimeRankings()
-                if (res != null) {
-                    rankingsList = res
-                } else {
-                    rankingsList = initData?.lifetimeRankings ?: emptyList()
-                }
+                // Handled reactively above
             }
             1 -> {
                 val seasonId = selectedSeasonId ?: initData?.activeSeason?.id ?: initData?.seasons?.firstOrNull()?.id
@@ -79,13 +94,13 @@ fun RankingsScreen(
                 }
             }
             2 -> {
-                val date = selectedDate ?: initData?.defaultDate ?: initData?.playDateStrings?.firstOrNull()
-                if (date != null) {
-                    if (selectedDate == null) selectedDate = date
+                val date = selectedDate ?: return@LaunchedEffect
+                // Use cached data when selected date matches default date
+                if (date == currentDefaultDate && defaultDateRankings != null) {
+                    // Already handled reactively above
+                } else {
                     val res = TennisRepository.fetchDateRankings(date)
                     if (res != null) rankingsList = res
-                } else {
-                    rankingsList = initData?.defaultDateRankings ?: emptyList()
                 }
             }
         }

@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.sp
 import com.example.repository.TennisRepository
 import com.example.ui.*
 import com.example.ui.theme.MyApplicationTheme
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,10 +56,19 @@ fun MainAppLayout() {
     val scope = rememberCoroutineScope()
     val brandPrimary = MaterialTheme.colorScheme.primary
 
-    // Trigger API Initial bootstrap loads and live sync/polling background systems
+    // Trigger API Initial bootstrap load
     LaunchedEffect(Unit) {
         TennisRepository.fetchInitData()
+    }
+
+    // Start background sync on resume (power saving optimization)
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         TennisRepository.startBackgroundSync()
+    }
+
+    // Stop background sync on pause
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        TennisRepository.stopBackgroundSync()
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

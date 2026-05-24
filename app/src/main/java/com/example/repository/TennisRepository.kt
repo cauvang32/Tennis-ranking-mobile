@@ -21,9 +21,6 @@ import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.io.IOException
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 object TennisRepository {
     private const val PREFS_NAME = "tennis_prefs"
@@ -36,6 +33,7 @@ object TennisRepository {
     private lateinit var cookieJar: PersistentCookieJar
     private lateinit var moshi: Moshi
     private lateinit var okHttpClient: OkHttpClient
+    private lateinit var sseClient: OkHttpClient // P1: Reusable SSE client
     private lateinit var api: TennisApi
 
     private val _isAuthenticated = MutableStateFlow(false)
@@ -56,9 +54,6 @@ object TennisRepository {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    private val _isSandboxMode = MutableStateFlow(false)
-    val isSandboxMode: StateFlow<Boolean> = _isSandboxMode.asStateFlow()
-
     private val _themeOverride = MutableStateFlow<Boolean?>(null)
     val themeOverride: StateFlow<Boolean?> = _themeOverride.asStateFlow()
 
@@ -74,51 +69,6 @@ object TennisRepository {
     private var currentBearerToken: String? = null
     const val BASE_URL = "https://hungsanity.com/tennis/api/"
 
-    fun setSandboxMode(enabled: Boolean) {
-        _isSandboxMode.value = enabled
-        sharedPrefs.edit().putBoolean("is_sandbox_mode", enabled).apply()
-        if (enabled) {
-            _isAuthenticated.value = true
-            _currentUser.value = User(999, "demo_admin", "demo@example.com", "admin", "Demo Sandbox Admin")
-            val cached = loadSandboxDataFromPrefs()
-            if (cached != null) {
-                _initData.value = cached
-            } else {
-                CoroutineScope(Dispatchers.IO).launch {
-                    fetchInitData(showLoading = false)
-                }
-            }
-        } else {
-            clearSession()
-            CoroutineScope(Dispatchers.IO).launch {
-                fetchInitData(showLoading = true)
-            }
-        }
-    }
-
-    fun saveSandboxDataToPrefs() {
-        _initData.value?.let { data ->
-            try {
-                val dataStr = moshi.adapter(InitResponse::class.java).toJson(data)
-                sharedPrefs.edit().putString("sandbox_init_data", dataStr).apply()
-            } catch (e: Exception) {
-                Log.e("TennisRepository", "Error saving sandbox data", e)
-            }
-        }
-    }
-
-    private fun loadSandboxDataFromPrefs(): InitResponse? {
-        val dataStr = sharedPrefs.getString("sandbox_init_data", null)
-        if (dataStr != null) {
-            try {
-                return moshi.adapter(InitResponse::class.java).fromJson(dataStr)
-            } catch (e: Exception) {
-                Log.e("TennisRepository", "Error loading sandbox data", e)
-            }
-        }
-        return null
-    }
-
     fun initialize(androidContext: Context) {
         context = androidContext.applicationContext
         sharedPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -129,8 +79,6 @@ object TennisRepository {
             .add(CoerceDoubleAdapter())
             .addLast(KotlinJsonAdapterFactory())
             .build()
-
-        _isSandboxMode.value = false
 
         // Load credentials from Prefs
         currentBearerToken = sharedPrefs.getString(KEY_BEARER_TOKEN, null)
@@ -176,6 +124,11 @@ object TennisRepository {
             .cookieJar(cookieJar)
             .addInterceptor(headerInterceptor)
             .addInterceptor(loggingInterceptor)
+            .build()
+
+        // P1: Build SSE client once with no read timeout for long-lived connections
+        sseClient = okHttpClient.newBuilder()
+            .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
             .build()
 
         val retrofit = Retrofit.Builder()
@@ -225,12 +178,9 @@ object TennisRepository {
             } else {
                 val parsedError = parseError(response)
                 // Handle 401 unauth / 403 CSRF problems
-                if (response.code() == 401 || response.code() == 403 && parsedError.contains("CSRF", ignoreCase = true)) {
-                    Log.w("TennisRepository", "Auth expired, clearing credentials")
-                    // If CSRF error or forbidden, refresh csrf optionally or log out
-                    if (response.code() == 401) {
-                        clearSession()
-                    }
+                if (response.code() == 401 || (response.code() == 403 && parsedError.contains("CSRF", ignoreCase = true))) {
+                    Log.w("TennisRepository", "Auth expired or CSRF error, clearing credentials")
+                    clearSession()
                 }
                 _errorMessage.value = parsedError
                 if (showLoading) {
@@ -255,36 +205,19 @@ object TennisRepository {
         }
     }
 
-    // Fetch initial app summary bootstrap data
+    // Fetch initial app summary bootstrap data (P2: simplified, no redundant deserialization)
     suspend fun fetchInitData(showLoading: Boolean = true): InitResponse? {
-        if (_isSandboxMode.value) {
-            val cached = loadSandboxDataFromPrefs()
-            if (cached != null) {
-                _initData.value = cached
-                return cached
-            }
-        }
         val result = safeApiCall(showLoading) { api.getInitData() }
         if (result != null) {
-            if (_isSandboxMode.value) {
-                val cached = loadSandboxDataFromPrefs()
-                if (cached != null) {
-                    _initData.value = cached
-                    return cached
-                } else {
-                    _initData.value = result
-                    saveSandboxDataToPrefs()
-                }
-            } else {
-                _initData.value = result
-            }
-            // Auto update CSRF token if database provides one
+            _initData.value = result
+            // Auto update CSRF token if provided
             result.csrfToken?.let { token ->
                 setCsrfToken(token)
             }
-            if (!_isSandboxMode.value && result.user != null) {
-                _currentUser.value = result.user
-                _isAuthenticated.value = result.isAuthenticated ?: false
+            _currentUser.value = result.user
+            _isAuthenticated.value = result.isAuthenticated ?: false
+            if (result.user == null && _isAuthenticated.value) {
+                clearSession()
             }
         }
         return result
@@ -317,17 +250,22 @@ object TennisRepository {
         return false
     }
 
-    // Refresh Session
+    // P9: Refresh Session with proper error handling
     suspend fun refreshSession(): Boolean {
-        val response = api.refreshAuth()
-        if (response.isSuccessful) {
-            val body = response.body()
-            if (body != null && body.success) {
-                saveSession(body)
-                return true
+        return try {
+            val response = api.refreshAuth()
+            if (response.isSuccessful) {
+                val body = response.body()
+                if (body != null && body.success) {
+                    saveSession(body)
+                    return true
+                }
             }
+            false
+        } catch (e: Exception) {
+            Log.e("TennisRepository", "Session refresh failed", e)
+            false
         }
-        return false
     }
 
     // Logout Action
@@ -356,19 +294,6 @@ object TennisRepository {
 
     // Player Operations
     suspend fun createPlayer(name: String): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val newId = (current.players?.maxOfOrNull { it.id } ?: 0) + 1
-            val newPlayer = Player(newId, name, SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
-            val updatedPlayers = (current.players ?: emptyList()) + newPlayer
-            val updatedRankings = (current.lifetimeRankings ?: emptyList()) + RankingEntry(
-                id = newId, name = name, wins = 0, losses = 0, totalMatches = 0, points = 0, winPercentage = 0.0, moneyLost = 0, form = emptyList()
-            )
-            val updated = current.copy(players = updatedPlayers, lifetimeRankings = updatedRankings)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.createPlayer(CreatePlayerRequest(name)) }
         if (res?.success == true) {
             fetchInitData()
@@ -378,15 +303,6 @@ object TennisRepository {
     }
 
     suspend fun deletePlayer(id: Int): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val updatedPlayers = current.players?.filter { it.id != id }
-            val updatedRankings = current.lifetimeRankings?.filter { it.id != id }
-            val updated = current.copy(players = updatedPlayers, lifetimeRankings = updatedRankings)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.deletePlayer(id) }
         if (res?.success == true) {
             fetchInitData()
@@ -396,35 +312,11 @@ object TennisRepository {
     }
 
     suspend fun fetchPlayers(): List<Player>? {
-        if (_isSandboxMode.value) {
-            return _initData.value?.players
-        }
         return safeApiCall { api.getPlayers() }
     }
 
     // Season Operations
     suspend fun createSeason(req: CreateSeasonRequest): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val newId = (current.seasons?.maxOfOrNull { it.id } ?: 0) + 1
-            val newSeason = Season(
-                id = newId,
-                name = req.name,
-                startDate = req.startDate,
-                endDate = req.endDate,
-                isActive = true,
-                autoEnd = req.autoEnd,
-                description = req.description,
-                loseMoneyPerLoss = req.loseMoneyPerLoss ?: 20000
-            )
-            val updatedSeasons = (current.seasons ?: emptyList()).map {
-                it.copy(isActive = false)
-            } + newSeason
-            val updated = current.copy(seasons = updatedSeasons, activeSeason = newSeason)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.createSeason(req) }
         if (res?.success == true) {
             fetchInitData()
@@ -434,35 +326,6 @@ object TennisRepository {
     }
 
     suspend fun updateSeason(id: Int, req: CreateSeasonRequest): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val updatedSeasons = current.seasons?.map {
-                if (it.id == id) {
-                    it.copy(
-                        name = req.name,
-                        startDate = req.startDate,
-                        endDate = req.endDate,
-                        autoEnd = req.autoEnd,
-                        description = req.description,
-                        loseMoneyPerLoss = req.loseMoneyPerLoss ?: 20000
-                    )
-                } else it
-            }
-            val activeSeason = if (current.activeSeason?.id == id) {
-                current.activeSeason.copy(
-                    name = req.name,
-                    startDate = req.startDate,
-                    endDate = req.endDate,
-                    autoEnd = req.autoEnd,
-                    description = req.description,
-                    loseMoneyPerLoss = req.loseMoneyPerLoss ?: 20000
-                )
-            } else current.activeSeason
-            val updated = current.copy(seasons = updatedSeasons, activeSeason = activeSeason)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.updateSeason(id, req) }
         if (res?.success == true) {
             fetchInitData()
@@ -472,17 +335,6 @@ object TennisRepository {
     }
 
     suspend fun deleteSeason(id: Int): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val updatedSeasons = current.seasons?.filter { it.id != id }
-            val activeSeason = if (current.activeSeason?.id == id) {
-                updatedSeasons?.firstOrNull { it.isActive }
-            } else current.activeSeason
-            val updated = current.copy(seasons = updatedSeasons, activeSeason = activeSeason)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.deleteSeason(id) }
         if (res?.success == true) {
             fetchInitData()
@@ -492,17 +344,6 @@ object TennisRepository {
     }
 
     suspend fun endSeason(id: Int, endDate: String): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val updatedSeasons = current.seasons?.map {
-                if (it.id == id) it.copy(isActive = false, endDate = endDate) else it
-            }
-            val activeSeason = if (current.activeSeason?.id == id) current.activeSeason.copy(isActive = false, endDate = endDate) else current.activeSeason
-            val updated = current.copy(seasons = updatedSeasons, activeSeason = activeSeason)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.endSeason(id, EndSeasonRequest(endDate)) }
         if (res?.success == true) {
             fetchInitData()
@@ -512,17 +353,6 @@ object TennisRepository {
     }
 
     suspend fun reactivateSeason(id: Int): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val updatedSeasons = current.seasons?.map {
-                if (it.id == id) it.copy(isActive = true, endDate = null) else it.copy(isActive = false)
-            }
-            val active = updatedSeasons?.find { it.id == id }
-            val updated = current.copy(seasons = updatedSeasons, activeSeason = active)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.reactivateSeason(id) }
         if (res?.success == true) {
             fetchInitData()
@@ -532,9 +362,6 @@ object TennisRepository {
     }
 
     suspend fun updateSeasonPlayers(seasonId: Int, playerIds: List<Int>): Boolean {
-        if (_isSandboxMode.value) {
-            return true
-        }
         val res = safeApiCall { api.replaceSeasonPlayers(seasonId, SeasonPlayersRequest(playerIds)) }
         if (res?.success == true) {
             fetchInitData()
@@ -544,101 +371,12 @@ object TennisRepository {
     }
 
     suspend fun getSeasonPlayers(seasonId: Int): List<Player> {
-        if (_isSandboxMode.value) return emptyList()
         val res = safeApiCall { api.getSeasonPlayers(seasonId) }
         return res ?: emptyList()
     }
 
     // Match Operations
     suspend fun createMatch(req: CreateMatchRequest): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val newId = (current.defaultDateMatches?.maxOfOrNull { it.id } ?: 0) + 1
-            val p1_name = current.players?.find { it.id == req.player1Id }?.name ?: "Player ${req.player1Id}"
-            val p2_name = current.players?.find { it.id == req.player2Id }?.name
-            val p3_name = current.players?.find { it.id == req.player3Id }?.name ?: "Player ${req.player3Id}"
-            val p4_name = current.players?.find { it.id == req.player4Id }?.name
-            
-            val newMatch = Match(
-                id = newId,
-                seasonId = req.seasonId,
-                playDate = req.playDate,
-                player1Id = req.player1Id,
-                player2Id = req.player2Id,
-                player3Id = req.player3Id,
-                player4Id = req.player4Id,
-                team1Score = req.team1Score,
-                team2Score = req.team2Score,
-                winningTeam = req.winningTeam,
-                matchType = req.matchType,
-                player1_name = p1_name,
-                player2_name = p2_name,
-                player3_name = p3_name,
-                player4_name = p4_name
-            )
-            
-            val updatedMatches = listOf(newMatch) + (current.defaultDateMatches ?: emptyList())
-            
-            val updatedPlayDates = if (current.playDates?.any { it.playDate == req.playDate } == true) {
-                current.playDates
-            } else {
-                listOf(PlayDateEntry(req.playDate)) + (current.playDates ?: emptyList())
-            }
-            
-            val season = current.seasons?.find { it.id == req.seasonId }
-            val lossPenalty = season?.loseMoneyPerLoss ?: 20000
-            
-            val updatedRankings = current.lifetimeRankings?.map { ranking ->
-                var wins = ranking.wins
-                var losses = ranking.losses
-                var total = ranking.totalMatches
-                var points = ranking.points
-                var money = ranking.moneyLost ?: 0
-                
-                val pIdsInTeam1 = listOfNotNull(req.player1Id, req.player2Id)
-                val pIdsInTeam2 = listOfNotNull(req.player3Id, req.player4Id)
-                
-                if (pIdsInTeam1.contains(ranking.id)) {
-                    total += 1
-                    if (req.winningTeam == 1) {
-                        wins += 1
-                        points += 3
-                    } else {
-                        losses += 1
-                        money += lossPenalty
-                    }
-                } else if (pIdsInTeam2.contains(ranking.id)) {
-                    total += 1
-                    if (req.winningTeam == 2) {
-                        wins += 1
-                        points += 3
-                    } else {
-                        losses += 1
-                        money += lossPenalty
-                    }
-                }
-                
-                val pct = if (total > 0) (wins.toDouble() / total.toDouble()) * 100.0 else 0.0
-                ranking.copy(
-                    wins = wins,
-                    losses = losses,
-                    totalMatches = total,
-                    points = points,
-                    winPercentage = pct,
-                    moneyLost = money
-                )
-            }
-            
-            val updated = current.copy(
-                defaultDateMatches = updatedMatches,
-                playDates = updatedPlayDates,
-                lifetimeRankings = updatedRankings
-            )
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
-        
         val res = safeApiCall { api.createMatch(req) }
         if (res?.success == true) {
             fetchInitData()
@@ -648,38 +386,6 @@ object TennisRepository {
     }
 
     suspend fun updateMatch(id: Int, req: CreateMatchRequest): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val p1_name = current.players?.find { it.id == req.player1Id }?.name ?: "Player ${req.player1Id}"
-            val p2_name = current.players?.find { it.id == req.player2Id }?.name
-            val p3_name = current.players?.find { it.id == req.player3Id }?.name ?: "Player ${req.player3Id}"
-            val p4_name = current.players?.find { it.id == req.player4Id }?.name
-            
-            val updatedMatches = current.defaultDateMatches?.map {
-                if (it.id == id) {
-                    it.copy(
-                        seasonId = req.seasonId,
-                        playDate = req.playDate,
-                        player1Id = req.player1Id,
-                        player2Id = req.player2Id,
-                        player3Id = req.player3Id,
-                        player4Id = req.player4Id,
-                        team1Score = req.team1Score,
-                        team2Score = req.team2Score,
-                        winningTeam = req.winningTeam,
-                        matchType = req.matchType,
-                        player1_name = p1_name,
-                        player2_name = p2_name,
-                        player3_name = p3_name,
-                        player4_name = p4_name
-                    )
-                } else it
-            }
-            val updated = current.copy(defaultDateMatches = updatedMatches)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.updateMatch(id, req) }
         if (res?.success == true) {
             fetchInitData()
@@ -689,62 +395,6 @@ object TennisRepository {
     }
 
     suspend fun deleteMatch(id: Int): Boolean {
-        if (_isSandboxMode.value) {
-            val current = _initData.value ?: return false
-            val match = current.defaultDateMatches?.find { it.id == id }
-            val updatedMatches = current.defaultDateMatches?.filter { it.id != id }
-            
-            val updatedRankings = if (match != null) {
-                val season = current.seasons?.find { it.id == match.seasonId }
-                val lossPenalty = season?.loseMoneyPerLoss ?: 20000
-                current.lifetimeRankings?.map { ranking ->
-                    var wins = ranking.wins
-                    var losses = ranking.losses
-                    var total = ranking.totalMatches
-                    var points = ranking.points
-                    var money = ranking.moneyLost ?: 0
-                    
-                    val pIdsInTeam1 = listOfNotNull(match.player1Id, match.player2Id)
-                    val pIdsInTeam2 = listOfNotNull(match.player3Id, match.player4Id)
-                    
-                    if (pIdsInTeam1.contains(ranking.id)) {
-                        if (total > 0) total -= 1
-                        if (match.winningTeam == 1) {
-                            if (wins > 0) wins -= 1
-                            if (points >= 3) points -= 3
-                        } else {
-                            if (losses > 0) losses -= 1
-                            if (money >= lossPenalty) money -= lossPenalty
-                        }
-                    } else if (pIdsInTeam2.contains(ranking.id)) {
-                        if (total > 0) total -= 1
-                        if (match.winningTeam == 2) {
-                            if (wins > 0) wins -= 1
-                            if (points >= 3) points -= 3
-                        } else {
-                            if (losses > 0) losses -= 1
-                            if (money >= lossPenalty) money -= lossPenalty
-                        }
-                    }
-                    val pct = if (total > 0) (wins.toDouble() / total.toDouble()) * 100.0 else 0.0
-                    ranking.copy(
-                        wins = wins,
-                        losses = losses,
-                        totalMatches = total,
-                        points = points,
-                        winPercentage = pct,
-                        moneyLost = money
-                    )
-                }
-            } else {
-                current.lifetimeRankings
-            }
-            
-            val updated = current.copy(defaultDateMatches = updatedMatches, lifetimeRankings = updatedRankings)
-            _initData.value = updated
-            saveSandboxDataToPrefs()
-            return true
-        }
         val res = safeApiCall { api.deleteMatch(id) }
         if (res?.success == true) {
             fetchInitData()
@@ -824,25 +474,29 @@ object TennisRepository {
     }
 
     private var isSseRunning = false
+    private var syncScope: CoroutineScope? = null
+    private var currentSseCall: okhttp3.Call? = null
+    // P4: Debounce timestamp for SSE-triggered fetches
+    private var lastSseFetchTime = 0L
 
     fun startBackgroundSync() {
         if (isSseRunning) return
         isSseRunning = true
 
-        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
         // 1. SSE Connection stream loop
-        scope.launch {
-            while (true) {
+        syncScope?.launch {
+            while (isActive) {
                 startSseStream()
-                // Wait 10 seconds before retrying SSE connection on failure/disconnect
-                delay(10000)
+                // Wait 3 seconds before retrying SSE connection on failure/disconnect
+                delay(3000)
             }
         }
 
         // 2. 15-second Polling fallback loop
-        scope.launch {
-            while (true) {
+        syncScope?.launch {
+            while (isActive) {
                 delay(15000)
                 try {
                     // Poll data-version
@@ -854,10 +508,22 @@ object TennisRepository {
                         fetchInitData(showLoading = false)
                     }
                 } catch (e: Exception) {
-                    Log.e("TennisRepository", "Polling fallback error: ${e.message}")
+                    if (e !is CancellationException) {
+                        Log.e("TennisRepository", "Polling fallback error: ${e.message}")
+                    }
                 }
             }
         }
+    }
+
+    fun stopBackgroundSync() {
+        if (!isSseRunning) return
+        isSseRunning = false
+        Log.i("TennisRepository", "Stopping background sync...")
+        syncScope?.cancel()
+        syncScope = null
+        currentSseCall?.cancel()
+        currentSseCall = null
     }
 
     private suspend fun startSseStream() = withContext(Dispatchers.IO) {
@@ -870,7 +536,10 @@ object TennisRepository {
 
         try {
             Log.d("TennisRepository", "Connecting to SSE stream at ${BASE_URL}events")
-            okHttpClient.newCall(request).execute().use { response ->
+            // P1: Reuse pre-built SSE client instead of rebuilding on every reconnect
+            val call = sseClient.newCall(request)
+            currentSseCall = call
+            call.execute().use { response ->
                 if (!response.isSuccessful) {
                     Log.e("TennisRepository", "SSE connection failed: code ${response.code}")
                     return@withContext
@@ -879,17 +548,28 @@ object TennisRepository {
                 val source = response.body?.source() ?: return@withContext
                 Log.i("TennisRepository", "SSE stream established successfully")
 
-                while (true) {
+                while (isActive) {
                     val line = source.readUtf8Line() ?: break
                     val trimmed = line.trim()
                     if (trimmed.startsWith("data:")) {
-                        Log.i("TennisRepository", "SSE event received, triggering sync update")
-                        fetchInitData(showLoading = false)
+                        // P4: Debounce — skip if last fetch was less than 2 seconds ago
+                        val now = System.currentTimeMillis()
+                        if (now - lastSseFetchTime > 2000) {
+                            lastSseFetchTime = now
+                            Log.i("TennisRepository", "SSE event received, triggering sync update")
+                            fetchInitData(showLoading = false)
+                        } else {
+                            Log.d("TennisRepository", "SSE event debounced, skipping fetch")
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e("TennisRepository", "SSE stream disconnect / exception: ${e.message}")
+            if (e !is CancellationException && e.message?.equals("canceled", ignoreCase = true) != true) {
+                Log.e("TennisRepository", "SSE stream disconnect / exception: ${e.message}")
+            }
+        } finally {
+            currentSseCall = null
         }
     }
 }

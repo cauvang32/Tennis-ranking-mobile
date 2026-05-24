@@ -57,30 +57,34 @@ fun DashboardScreen(
     var matchesList by remember { mutableStateOf<List<Match>>(emptyList()) }
     var isFilterMatchesLoading by remember { mutableStateOf(false) }
 
-    val isSandboxMode by TennisRepository.isSandboxMode.collectAsState()
-
     // Colors aligned with High-Density CSS
     val brandPrimary = MaterialTheme.colorScheme.primary
     val textBase = MaterialTheme.colorScheme.onSurface
     val cardStroke = MaterialTheme.colorScheme.outline
-    
-    // Load matches on selected date or defaultDate or selected season
-    LaunchedEffect(initData, selectedFilterDate, selectedFilterSeasonId, filterType, isSandboxMode) {
+
+    // P5: Use stable keys from initData to avoid redundant API calls on every background sync
+    val currentDefaultDate = initData?.defaultDate
+    val currentDefaultDateMatches = initData?.defaultDateMatches
+
+    // Reactively update match list when showing default view (no API call needed)
+    LaunchedEffect(currentDefaultDateMatches, filterType, selectedFilterDate) {
+        if (filterType == 0 && (selectedFilterDate == null || selectedFilterDate == currentDefaultDate)) {
+            matchesList = currentDefaultDateMatches ?: emptyList()
+        }
+    }
+
+    // Fetch from API only when user explicitly changes filter selections
+    LaunchedEffect(selectedFilterDate, selectedFilterSeasonId, filterType) {
         if (filterType == 0) {
-            val date = selectedFilterDate ?: initData?.defaultDate
-            if (date != null) {
-                isFilterMatchesLoading = true
-                val matches = TennisRepository.fetchMatchesByDate(date)
-                if (matches != null) {
-                    matchesList = matches
-                } else if (selectedFilterDate == null) {
-                    // Fallback to initData's matches
-                    matchesList = initData?.defaultDateMatches ?: emptyList()
-                }
-                isFilterMatchesLoading = false
-            } else {
-                matchesList = initData?.defaultDateMatches ?: emptyList()
+            val date = selectedFilterDate ?: return@LaunchedEffect
+            // P7: Use cached data when selected date matches default date
+            if (date == currentDefaultDate) return@LaunchedEffect
+            isFilterMatchesLoading = true
+            val matches = TennisRepository.fetchMatchesByDate(date)
+            if (matches != null) {
+                matchesList = matches
             }
+            isFilterMatchesLoading = false
         } else {
             val seasons = initData?.seasons ?: emptyList()
             val seasonId = selectedFilterSeasonId ?: initData?.activeSeason?.id ?: seasons.firstOrNull()?.id
