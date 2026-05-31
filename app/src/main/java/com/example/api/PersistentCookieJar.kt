@@ -62,8 +62,6 @@ class PersistentCookieJar(context: Context) : CookieJar {
             if (cookie.persistent && cookie.expiresAt < System.currentTimeMillis()) {
                 // Expired, remove
                 if (domainMap.remove(cookie.name) != null) { cookiesModified = true }
-                    cookiesModified = true
-                }
             } else {
                 domainMap[cookie.name] = cookie
                 cookiesModified = true

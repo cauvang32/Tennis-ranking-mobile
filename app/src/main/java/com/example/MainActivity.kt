@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.repository.TennisRepository
+import com.example.notification.NotificationHelper
 import com.example.ui.*
 import com.example.ui.theme.MyApplicationTheme
 import androidx.lifecycle.Lifecycle
@@ -35,6 +36,10 @@ class MainActivity : ComponentActivity() {
         
         // Initialize Core Tennis System
         TennisRepository.initialize(applicationContext)
+
+        // Initialize notification system
+        NotificationHelper.initialize(applicationContext)
+        com.example.repository.NotificationRepository.initialize(applicationContext)
 
         enableEdgeToEdge()
         setContent {

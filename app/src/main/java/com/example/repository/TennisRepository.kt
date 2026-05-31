@@ -44,10 +44,9 @@ object TennisRepository {
     private lateinit var sseClient: OkHttpClient // P1: Reusable SSE client
     private lateinit var api: TennisApi
 
-    private val notificationRepository: NotificationRepository by lazy {
-        NotificationRepository(context)
-    }
-    fun getNotificationRepository(): NotificationRepository = notificationRepository
+    private val notificationRepository: NotificationRepository
+        get() = NotificationRepository
+    fun getNotificationRepository(): NotificationRepository = NotificationRepository
 
     private val _isAuthenticated = MutableStateFlow(false)
     val isAuthenticated: StateFlow<Boolean> = _isAuthenticated.asStateFlow()
@@ -250,8 +249,51 @@ object TennisRepository {
             if (result.user == null && _isAuthenticated.value) {
                 clearSession()
             }
+            // Emit notifications for new matches/seasons
+            checkAndEmitNotifications(result)
         }
         return result
+    }
+
+    /**
+     * Check fetched data for new matches/seasons and emit notifications.
+     * Called after fetchInitData completes successfully.
+     */
+    private suspend fun checkAndEmitNotifications(result: InitResponse) {
+        try {
+            val currentMatchIds = result.matches.mapNotNull { it.id }
+            val currentSeasonIds = result.seasons.mapNotNull { it.id }
+            val newMatchIds = NotificationRepository.findNewMatches(currentMatchIds)
+            val newSeasonIds = NotificationRepository.findNewSeasons(currentSeasonIds)
+
+            for (matchId in newMatchIds) {
+                val match = result.matches.find { it.id == matchId }
+                if (match != null) {
+                    val title = "${match.player1Name ?: "Unknown"} vs ${match.player2Name ?: "Unknown"}"
+                    val subtitle = match.seasonName ?: "Tennis Match"
+                    NotificationHelper.showNewMatchNotification(context, matchId, title, subtitle)
+                }
+            }
+
+            for (seasonId in newSeasonIds) {
+                val season = result.seasons.find { it.id == seasonId }
+                if (season != null) {
+                    val title = season.name ?: "New Season"
+                    val subtitle = if (season.startDate != null) "Started: ${season.startDate}" else ""
+                    NotificationHelper.showNewSeasonNotification(context, seasonId, title, subtitle)
+                }
+            }
+
+            // Update last seen IDs to prevent duplicate notifications
+            if (newMatchIds.isNotEmpty()) {
+                NotificationRepository.markAllMatchesSeen(newMatchIds.max())
+            }
+            if (newSeasonIds.isNotEmpty()) {
+                NotificationRepository.markAllSeasonsSeen(newSeasonIds.max())
+            }
+        } catch (e: Exception) {
+            Log.e("TennisRepository", "Failed to emit notifications", e)
+        }
     }
 
     // Login Action
@@ -687,65 +729,5 @@ class CoerceDoubleAdapter {
     @ToJson
     fun toJson(writer: JsonWriter, value: Double?) {
         writer.value(value)
-    }
-}
-
-    /**
-     * Extension function to emit notifications for new matches/seasons via SSE events.
-     * Call this from a coroutine observing eventsStream().
-     */
-    suspend fun handleSseEventWithNotification(event: ServerEvent, context: Context) {
-        when (event.type) {
-            "match_create" -> {
-                val matchId = event.data["id"]?.toIntOrNull() ?: return
-                if (notificationRepository.isNewMatch(matchId)) {
-                    val title = event.data["title"] ?: "New Match"
-                    val description = "A new match has been added"
-                    NotificationHelper.showNewMatchNotification(context, matchId, title, description)
-                    notificationRepository.updateLastSeenMatchId(matchId)
-                }
-            }
-            "season_create" -> {
-                val seasonId = event.data["id"]?.toIntOrNull() ?: return
-                if (notificationRepository.isNewSeason(seasonId)) {
-                    val title = event.data["name"] ?: "New Season"
-                    val description = "A new season has been added"
-                    NotificationHelper.showNewSeasonNotification(context, seasonId, title, description)
-                    notificationRepository.updateLastSeenSeasonId(seasonId)
-                }
-            }
-        }
-    }
-
-    /**
-     * Process SSE events and emit notifications for new matches/seasons.
-     * Call this function when starting to listen to the eventsStream().
-     */
-    suspend fun processEventWithNotification(context: Context, event: ServerEvent) {
-        when (event.type) {
-            "match_create" -> {
-                val matchId = event.data["id"]?.toString()?.toIntOrNull() ?: return
-                val p1Name = event.data["player1Name"] ?: "Unknown"
-                val p2Name = event.data["player2Name"] ?: "Unknown"
-                NotificationHelper.showNewMatchNotification(
-                    context = context,
-                    matchId = matchId,
-                    title = "New Match: $p1Name vs $p2Name",
-                    subtitle = event.data["seasonName"] ?: "Season Match"
-                )
-                notificationRepository.updateLastSeenMatchId(matchId)
-            }
-            "season_create" -> {
-                val seasonId = event.data["id"]?.toString()?.toIntOrNull() ?: return
-                val seasonName = event.data["name"] ?: "New Season"
-                NotificationHelper.showNewSeasonNotification(
-                    context = context,
-                    seasonId = seasonId,
-                    title = "New Season: $seasonName",
-                    subtitle = event.data["startDate"] ?: ""
-                )
-                notificationRepository.updateLastSeenSeasonId(seasonId)
-            }
-        }
     }
 }
