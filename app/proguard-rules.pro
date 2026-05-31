@@ -47,6 +47,10 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 
+# === Security Crypto (Tink) ===
+# security-crypto transitively references errorprone.annotations — suppress missing-class warnings
+-dontwarn com.google.errorprone.annotations.**
+
 # === App API models ===
 # Keep all data classes used for API serialization
 -keep class com.example.api.** { *; }
