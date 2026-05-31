@@ -46,7 +46,6 @@ object TennisRepository {
 
     private val notificationRepository: NotificationRepository
         get() = NotificationRepository
-    fun getNotificationRepository(): NotificationRepository = NotificationRepository
 
     private val _isAuthenticated = MutableStateFlow(false)
     val isAuthenticated: StateFlow<Boolean> = _isAuthenticated.asStateFlow()
