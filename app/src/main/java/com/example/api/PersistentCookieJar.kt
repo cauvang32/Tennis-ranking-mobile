@@ -8,7 +8,17 @@ import okhttp3.HttpUrl
 import java.util.concurrent.ConcurrentHashMap
 
 class PersistentCookieJar(context: Context) : CookieJar {
-    private val sharedPrefs = context.getSharedPreferences("tennis_cookies", Context.MODE_PRIVATE)
+    // SECURITY FIX: Use EncryptedSharedPreferences for secure cookie storage
+    private val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+        .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+        .build()
+    private val sharedPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+        context,
+        "tennis_cookies_encrypted",
+        masterKey,
+        androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+    )
     private val cookiesStorage = ConcurrentHashMap<String, MutableMap<String, Cookie>>()
 
     init {
@@ -47,20 +57,20 @@ class PersistentCookieJar(context: Context) : CookieJar {
         val host = url.host
         val domainMap = cookiesStorage.getOrPut(host) { ConcurrentHashMap() }
         
-        var modified = false
+        var cookiesModified = false
         for (cookie in cookies) {
             if (cookie.persistent && cookie.expiresAt < System.currentTimeMillis()) {
                 // Expired, remove
-                if (domainMap.remove(cookie.name) != null) {
-                    modified = true
+                if (domainMap.remove(cookie.name) != null) { cookiesModified = true }
+                    cookiesModified = true
                 }
             } else {
                 domainMap[cookie.name] = cookie
-                modified = true
+                cookiesModified = true
             }
         }
 
-        if (modified) {
+        if (cookiesModified) {
             val activeCookies = domainMap.values.filter { !it.persistent || it.expiresAt >= System.currentTimeMillis() }
             val cookieStrings = activeCookies.map { it.toString() }.toSet()
             sharedPrefs.edit().putStringSet(host, cookieStrings).apply()

@@ -223,8 +223,11 @@ fun PlayersScreen(
                 }
             } else {
                 val allPlayers = initData?.players ?: emptyList()
-                val filteredPlayers = allPlayers.filter {
-                    it.name.contains(searchQuery, ignoreCase = true)
+                val filteredPlayers by remember(searchQuery, allPlayers) {
+                    derivedStateOf {
+                        if (searchQuery.isBlank()) allPlayers
+                        else allPlayers.filter { it.name.contains(searchQuery, ignoreCase = true) }
+                    }
                 }
 
                 if (filteredPlayers.isEmpty()) {

@@ -50,3 +50,52 @@
 # === App API models ===
 # Keep all data classes used for API serialization
 -keep class com.example.api.** { *; }
+
+# === Security: Strip debug logging in release ===
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+    public static *** log(...);
+}
+# Remove Log tags to save string pool memory
+-assumenosideeffects class kotlin.jvm.internal.Intrinsics {
+    static void checkExpressionValueIsNotNull(...);
+}
+
+# === Compose optimization ===
+# Keep Compose runtime
+-keep class androidx.compose.** { *; }
+-dontwarn androidx.compose.**
+# Keep Composables for tree shaking
+-keep class androidx.compose.runtime.** { *; }
+# Keep remember and derivedStateOf
+-keepclassmembers class androidx.compose.runtime.** {
+    <fields>;
+}
+
+# === Security: Strip debug logging in release ===
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+    public static *** log(...);
+}
+
+# === Compose optimization ===
+-keep class androidx.compose.** { *; }
+-dontwarn androidx.compose.**
+-keep class androidx.compose.runtime.** { *; }
+
+# === Security: Strip debug logging in release ===
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+    public static *** log(...);
+}
+
+# === Compose optimization ===
+-keep class androidx.compose.** { *; }
+-dontwarn androidx.compose.**
+-keep class androidx.compose.runtime.** { *; }
