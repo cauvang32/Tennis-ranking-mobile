@@ -261,30 +261,29 @@ object TennisRepository {
      */
     private suspend fun checkAndEmitNotifications(result: InitResponse) {
         try {
-            val currentMatchIds = result.matches.mapNotNull { it.id }
-            val currentSeasonIds = result.seasons.mapNotNull { it.id }
+            val currentMatchIds = result.defaultDateMatches.orEmpty().mapNotNull { it.id }
+            val currentSeasonIds = result.activeSeasons.orEmpty().mapNotNull { it.id }
             val newMatchIds = NotificationRepository.findNewMatches(currentMatchIds)
             val newSeasonIds = NotificationRepository.findNewSeasons(currentSeasonIds)
 
             for (matchId in newMatchIds) {
-                val match = result.matches.find { it.id == matchId }
+                val match = result.defaultDateMatches?.find { it.id == matchId }
                 if (match != null) {
-                    val title = "${match.player1Name ?: "Unknown"} vs ${match.player2Name ?: "Unknown"}"
-                    val subtitle = match.seasonName ?: "Tennis Match"
+                    val title = "${match.player1_name ?: "Unknown"} vs ${match.player2_name ?: "Unknown"}"
+                    val subtitle = match.seasonId.toString()
                     NotificationHelper.showNewMatchNotification(context, matchId, title, subtitle)
                 }
             }
 
             for (seasonId in newSeasonIds) {
-                val season = result.seasons.find { it.id == seasonId }
+                val season = result.activeSeasons?.find { it.id == seasonId }
                 if (season != null) {
-                    val title = season.name ?: "New Season"
-                    val subtitle = if (season.startDate != null) "Started: ${season.startDate}" else ""
+                    val title = season.name
+                    val subtitle = "Started: ${season.startDate}"
                     NotificationHelper.showNewSeasonNotification(context, seasonId, title, subtitle)
                 }
             }
 
-            // Update last seen IDs to prevent duplicate notifications
             if (newMatchIds.isNotEmpty()) {
                 NotificationRepository.markAllMatchesSeen(newMatchIds.max())
             }
