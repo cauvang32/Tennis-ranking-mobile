@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import okhttp3.CertificatePinner
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -137,14 +136,8 @@ object TennisRepository {
             chain.proceed(builder.build())
         }
 
-        // SSL Certificate Pinning to prevent MitM proxy interception
-        val certificatePinner = CertificatePinner.Builder()
-            .add("hungsanity.com", "sha256/qwEqdHE3eI23vbVyZOoDcJcuCNl39yadoKBIWfeZ3EU=")
-            .build()
-
         okHttpClient = OkHttpClient.Builder()
             .cookieJar(cookieJar)
-            .certificatePinner(certificatePinner)
             .addInterceptor(headerInterceptor)
             .addInterceptor(loggingInterceptor)
             .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
